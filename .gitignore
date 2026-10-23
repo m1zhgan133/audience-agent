@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+.env
+exports/
+PROJECT_SPEC.md
+PROJECT_UNDERSTANDING.md
+RESUME_STAR.md
+resume_experience.tex
+messeges_from_tg.txt
+Запись экрана*.txt

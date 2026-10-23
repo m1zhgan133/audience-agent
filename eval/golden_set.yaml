@@ -1,0 +1,139 @@
+# Golden set: natural-language audience request -> reference SQL returning client_id.
+# The reference SQL is the ground truth ("second independent way to get the answer"). expected_size is documented from the
+# generated data (seed=42) and asserted by eval/selfcheck.py.
+#
+# This is a 22-item seed set for the baseline. Extend it for broader coverage.
+items:
+  - id: g01
+    question: Клиенты из Москвы и Московской области.
+    expected_size: 2020
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE region_code IN ('MOW','MO')
+
+  - id: g02
+    question: Все клиенты с кредитной картой.
+    expected_size: 2146
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE has_credit_card
+
+  - id: g03
+    question: Клиенты affluent-сегмента.
+    expected_size: 872
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE segment = 'affluent'
+
+  - id: g04
+    question: Премиальные клиенты (сегмент private).
+    expected_size: 123
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE segment = 'private'
+
+  - id: g05
+    question: Клиенты младше 25 лет.
+    expected_size: 562
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE age < 25
+
+  - id: g06
+    question: Клиенты с действующим вкладом.
+    expected_size: 1539
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE has_deposit
+
+  - id: g07
+    question: Клиенты с ипотекой.
+    expected_size: 613
+    reference_sql: SELECT client_id FROM dm_client_profile WHERE has_mortgage
+
+  - id: g08
+    question: Клиенты с просроченным кредитом.
+    expected_size: 90
+    reference_sql: SELECT DISTINCT client_id FROM dm_credit WHERE is_overdue
+
+  - id: g09
+    question: Клиенты с оценочным доходом выше 200 тысяч рублей в месяц.
+    expected_size: 745
+    reference_sql: SELECT client_id FROM dm_client_scores WHERE monthly_income_est > 200000
+
+  - id: g10
+    question: Клиенты с высоким риском оттока (скор оттока выше 0.8).
+    expected_size: 989
+    reference_sql: SELECT client_id FROM dm_client_scores WHERE churn_score > 0.8
+
+  - id: g11
+    question: Клиенты, давшие согласие на SMS-рассылку.
+    expected_size: 3490
+    reference_sql: SELECT client_id FROM dm_marketing_consent WHERE sms_ok
+
+  - id: g12
+    question: Клиенты со средним чеком за последние 3 месяца выше 50 000 рублей.
+    expected_size: 97
+    reference_sql: >
+      SELECT client_id FROM (
+        SELECT client_id, avg(avg_check) AS a
+        FROM dm_txn_monthly
+        WHERE month >= DATE '2026-04-01' AND avg_check > 0
+        GROUP BY client_id
+      ) t WHERE a > 50000
+
+  - id: g13
+    question: Клиенты, которые ни разу не пользовались кэшбэком, хотя он начислялся.
+    expected_size: 2550
+    reference_sql: >
+      SELECT client_id FROM (
+        SELECT client_id, sum(cashback_used) AS u, sum(cashback_earned) AS e
+        FROM dm_cashback_monthly GROUP BY client_id
+      ) t WHERE u = 0 AND e > 0
+
+  - id: g14
+    question: Держатели карт Visa.
+    expected_size: 2108
+    reference_sql: SELECT DISTINCT client_id FROM dm_card WHERE payment_system = 'visa'
+
+  - id: g15
+    question: Клиенты с валютным вкладом (в долларах или евро).
+    expected_size: 228
+    reference_sql: SELECT DISTINCT client_id FROM dm_deposit WHERE currency IN ('USD','EUR')
+
+  - id: g16
+    question: Молодые москвичи с кредитной картой (регион Москва, младше 30 лет).
+    expected_size: 126
+    reference_sql: >
+      SELECT client_id FROM dm_client_profile
+      WHERE region_code = 'MOW' AND age < 30 AND has_credit_card
+
+  - id: g17
+    question: Состоятельные клиенты (affluent или private) без инвестиционных продуктов.
+    expected_size: 606
+    reference_sql: >
+      SELECT client_id FROM dm_client_profile
+      WHERE segment IN ('affluent','private') AND NOT has_investment
+
+  - id: g18
+    question: Клиенты с заблокированной картой.
+    expected_size: 157
+    reference_sql: SELECT DISTINCT client_id FROM dm_card WHERE is_blocked
+
+  - id: g19
+    question: Активные пользователи мобильного приложения (в среднем более 20 входов в месяц).
+    expected_size: 1568
+    reference_sql: >
+      SELECT client_id FROM (
+        SELECT client_id, avg(app_logins) AS a
+        FROM dm_app_activity_monthly GROUP BY client_id
+      ) t WHERE a > 20
+
+  - id: g20
+    question: Клиенты из Москвы и области с кредитной картой и средним чеком за последние 3 месяца выше 50 000.
+    expected_size: 14
+    reference_sql: >
+      WITH ac AS (
+        SELECT client_id, avg(avg_check) AS a FROM dm_txn_monthly
+        WHERE month >= DATE '2026-04-01' AND avg_check > 0 GROUP BY client_id)
+      SELECT p.client_id FROM dm_client_profile p
+      JOIN ac ON ac.client_id = p.client_id
+      WHERE p.region_code IN ('MOW','MO') AND p.has_credit_card AND ac.a > 50000
+
+  - id: g21
+    question: Клиенты с высоким кредитным скорингом (800 и выше).
+    expected_size: 451
+    reference_sql: SELECT client_id FROM dm_client_scores WHERE credit_score >= 800
+
+  - id: g22
+    question: Держатели рублёвого вклада свыше 1 миллиона рублей.
+    expected_size: 1104
+    reference_sql: SELECT DISTINCT client_id FROM dm_deposit WHERE currency = 'RUB' AND amount > 1000000

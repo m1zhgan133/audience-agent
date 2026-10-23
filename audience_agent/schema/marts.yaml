@@ -1,0 +1,134 @@
+# Curated data marts ("витрины") exposed to the agent.
+# This file IS the agent's knowledge of the warehouse — it goes straight into the
+# system prompt. Rich, human descriptions + enum values + grain are what keep the
+# agent from silently querying the wrong table or inventing category values.
+dialect: DuckDB (PostgreSQL-compatible SQL)
+join_key: client_id  # every mart is joinable to clients on client_id
+
+marts:
+  - table: dm_client_profile
+    grain: one row per client (client_id)
+    description: >
+      Master client profile: geography, demographics, value segment, tenure and
+      denormalised product-ownership flags. Start here for most audiences; the
+      has_* flags are kept consistent with the detail marts, so a simple flag
+      filter is enough unless the user needs product-level detail.
+    columns:
+      client_id: {type: BIGINT, note: unique client id, join key}
+      region_code: {type: VARCHAR, enum: [MOW, MO, SPB, LO, NN, EKB, NSK, KZN, KDA, ROV],
+                    note: "MOW=Москва, MO=Московская обл., SPB=СПб, LO=Ленинградская обл., NN=Нижний Новгород, EKB=Екатеринбург, NSK=Новосибирск, KZN=Казань, KDA=Краснодар, ROV=Ростов"}
+      city: {type: VARCHAR, note: city name in Russian}
+      age: {type: INTEGER}
+      gender: {type: VARCHAR, enum: [M, F]}
+      segment: {type: VARCHAR, enum: [mass, affluent, private], note: value segment}
+      registration_date: {type: DATE}
+      tenure_months: {type: INTEGER, note: months since registration}
+      is_active: {type: BOOLEAN, note: used the bank in the last 90 days}
+      has_credit_card: {type: BOOLEAN}
+      has_debit_card: {type: BOOLEAN}
+      has_deposit: {type: BOOLEAN, note: has at least one active deposit}
+      has_mortgage: {type: BOOLEAN}
+      has_investment: {type: BOOLEAN}
+
+  - table: dm_client_products
+    grain: one row per client per held product
+    description: Product-holdings mart. One row per (client, product) the client owns.
+    columns:
+      client_id: {type: BIGINT}
+      product_type: {type: VARCHAR,
+        enum: [debit_card, credit_card, deposit, mortgage, auto_loan, cash_loan, investment, insurance]}
+      open_date: {type: DATE}
+      is_active: {type: BOOLEAN}
+      balance: {type: DOUBLE, note: product balance; negative for credit products}
+
+  - table: dm_card
+    grain: one row per issued card
+    description: Bank cards. A client may hold several cards.
+    columns:
+      card_id: {type: BIGINT}
+      client_id: {type: BIGINT}
+      card_type: {type: VARCHAR, enum: [debit, credit]}
+      payment_system: {type: VARCHAR, enum: [visa, mastercard, mir]}
+      open_date: {type: DATE}
+      is_blocked: {type: BOOLEAN}
+      credit_limit: {type: DOUBLE, note: 0 for debit cards}
+
+  - table: dm_txn_monthly
+    grain: one row per client per calendar month
+    description: >
+      Monthly spend aggregates. Data covers Jan..Jun 2026 (month is the first day
+      of the month). "Last 3 months" = 2026-04-01, 2026-05-01, 2026-06-01. Months
+      with no spend have zero counts; filter avg_check>0 before averaging it.
+    columns:
+      client_id: {type: BIGINT}
+      month: {type: DATE, note: first day of the month}
+      txn_cnt: {type: INTEGER}
+      txn_amount: {type: DOUBLE, note: total spend that month, RUB}
+      avg_check: {type: DOUBLE, note: average transaction size that month, RUB}
+      online_share: {type: DOUBLE, note: share of online spend, 0..1}
+
+  - table: dm_cashback_monthly
+    grain: one row per client per calendar month
+    description: >
+      Monthly cashback. cashback_used=0 means the client did not spend cashback
+      that month. "Never used cashback" = SUM(cashback_used)=0 over all months.
+    columns:
+      client_id: {type: BIGINT}
+      month: {type: DATE}
+      cashback_earned: {type: DOUBLE, note: cashback accrued that month, RUB}
+      cashback_used: {type: DOUBLE, note: cashback spent that month, RUB}
+
+  - table: dm_deposit
+    grain: one row per deposit account
+    description: Deposit accounts. A client may hold several.
+    columns:
+      deposit_id: {type: BIGINT}
+      client_id: {type: BIGINT}
+      amount: {type: DOUBLE, note: principal amount}
+      currency: {type: VARCHAR, enum: [RUB, USD, EUR]}
+      open_date: {type: DATE}
+      rate: {type: DOUBLE, note: annual rate, e.g. 0.12 = 12%}
+      is_active: {type: BOOLEAN}
+
+  - table: dm_credit
+    grain: one row per loan
+    description: Loans held by clients.
+    columns:
+      credit_id: {type: BIGINT}
+      client_id: {type: BIGINT}
+      product: {type: VARCHAR, enum: [mortgage, auto_loan, cash_loan]}
+      principal: {type: DOUBLE}
+      outstanding: {type: DOUBLE, note: remaining debt}
+      open_date: {type: DATE}
+      is_overdue: {type: BOOLEAN, note: currently past due}
+
+  - table: dm_app_activity_monthly
+    grain: one row per client per calendar month
+    description: Mobile-app engagement per month.
+    columns:
+      client_id: {type: BIGINT}
+      month: {type: DATE}
+      app_logins: {type: INTEGER, note: number of app logins that month}
+      push_enabled: {type: BOOLEAN}
+      last_active_date: {type: DATE, note: last activity date within the month (may be NULL)}
+
+  - table: dm_marketing_consent
+    grain: one row per client (client_id)
+    description: Marketing communication consent flags. Respect these before targeting.
+    columns:
+      client_id: {type: BIGINT}
+      sms_ok: {type: BOOLEAN}
+      email_ok: {type: BOOLEAN}
+      push_ok: {type: BOOLEAN}
+      call_ok: {type: BOOLEAN}
+      consent_updated: {type: DATE}
+
+  - table: dm_client_scores
+    grain: one row per client (client_id)
+    description: Model propensity / value scores.
+    columns:
+      client_id: {type: BIGINT}
+      monthly_income_est: {type: DOUBLE, note: estimated monthly income, RUB}
+      churn_score: {type: DOUBLE, note: probability of churn, 0..1}
+      ltv_est: {type: DOUBLE, note: estimated lifetime value, RUB}
+      credit_score: {type: INTEGER, note: 300..850}

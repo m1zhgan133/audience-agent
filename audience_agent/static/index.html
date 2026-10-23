@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audience Agent</title>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2029; --line:#2a323d; --fg:#e6e9ee; --muted:#8b95a3; --accent:#ffdd2d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); font-weight:600; }
+  header small { color:var(--muted); font-weight:400; margin-left:8px; }
+  main { display:grid; grid-template-columns:260px 1fr; height:calc(100vh - 51px); }
+  aside { border-right:1px solid var(--line); overflow:auto; padding:12px; }
+  aside h3 { font-size:12px; text-transform:uppercase; color:var(--muted); letter-spacing:.05em; }
+  .mart { padding:6px 8px; border-radius:6px; margin-bottom:2px; }
+  .mart b { color:var(--accent); }
+  .mart span { color:var(--muted); font-size:12px; }
+  section { display:flex; flex-direction:column; overflow:hidden; }
+  #log { flex:1; overflow:auto; padding:20px; }
+  .msg { max-width:820px; margin:0 auto 16px; }
+  .q { color:var(--accent); font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  pre { background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; margin:8px 0; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th,td { border:1px solid var(--line); padding:4px 8px; text-align:left; }
+  th { color:var(--muted); font-weight:500; }
+  .size { font-size:22px; font-weight:700; color:var(--accent); }
+  .row { display:flex; gap:8px; align-items:center; margin-top:8px; }
+  button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; }
+  button.sec { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  footer { border-top:1px solid var(--line); padding:12px 20px; }
+  .bar { display:flex; gap:8px; max-width:820px; margin:0 auto; }
+  input { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--fg); border-radius:8px; padding:10px 12px; }
+  .muted { color:var(--muted); }
+  .err { color:#ff6b6b; }
+</style>
+</head>
+<body>
+<header>Audience Agent <small>text-to-SQL подбор клиентских аудиторий · baseline</small></header>
+<main>
+  <aside><h3>Витрины</h3><div id="marts"></div></aside>
+  <section>
+    <div id="log">
+      <div class="msg muted">Опишите аудиторию словами — агент напишет SQL, выполнит его и вернёт клиентов.<br>
+      Например: «клиенты из Москвы и области с кредитной картой и средним чеком за последние 3 месяца выше 50 000».</div>
+    </div>
+    <footer><div class="bar">
+      <input id="q" placeholder="Опишите сегмент клиентов..." autofocus>
+      <button id="send">Найти</button>
+    </div></footer>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const log = $('#log');
+
+fetch('/api/schema').then(r=>r.json()).then(ms=>{
+  $('#marts').innerHTML = ms.map(m=>`<div class="mart"><b>${m.table}</b><br><span>${m.grain}</span></div>`).join('');
+});
+
+function esc(s){ return (s??'').toString().replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function renderTable(p){
+  if(!p || !p.columns) return '';
+  const head = '<tr>'+p.columns.map(c=>`<th>${esc(c)}</th>`).join('')+'</tr>';
+  const body = p.rows.map(r=>'<tr>'+r.map(v=>`<td>${esc(v)}</td>`).join('')+'</tr>').join('');
+  return `<table>${head}${body}</table>`;
+}
+
+async function ask(){
+  const q = $('#q').value.trim(); if(!q) return;
+  $('#q').value='';
+  const el = document.createElement('div'); el.className='msg';
+  el.innerHTML = `<div class="q">${esc(q)}</div><div class="card muted">Агент думает…</div>`;
+  log.appendChild(el); log.scrollTop = log.scrollHeight;
+  try{
+    const r = await (await fetch('/api/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})})).json();
+    const size = r.audience_size!=null ? `<div class="size">${r.audience_size.toLocaleString('ru')} клиентов</div>` : '<div class="err">аудитория не получена</div>';
+    el.innerHTML = `<div class="q">${esc(q)}</div><div class="card">
+      ${size}
+      <div class="muted">${esc(r.answer)}</div>
+      <pre id="sql">${esc(r.audience_sql||'—')}</pre>
+      ${renderTable(r.preview)}
+      <div class="muted" style="margin-top:6px">итераций: ${r.iterations}</div>
+      <div class="row">
+        <button class="sec" data-act="rerun">Выполнить изменённый SQL</button>
+        <button data-act="export">Экспорт CSV</button>
+        <span class="muted out"></span>
+      </div></div>`;
+    wire(el, r.audience_sql);
+  }catch(e){ el.querySelector('.card').innerHTML = `<span class="err">Ошибка: ${esc(e)}</span>`; }
+  log.scrollTop = log.scrollHeight;
+}
+
+function wire(el, initialSql){
+  const pre = el.querySelector('#sql'); if(pre) pre.contentEditable = true;
+  const out = el.querySelector('.out');
+  el.querySelector('[data-act=rerun]')?.addEventListener('click', async ()=>{
+    const sql = pre.innerText;
+    const r = await (await fetch('/api/execute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})})).json();
+    let box = el.querySelector('.reexec'); if(!box){ box=document.createElement('div'); box.className='reexec'; pre.after(box); }
+    box.innerHTML = r.ok ? `<div class="size">${r.total.toLocaleString('ru')} строк</div>${renderTable(r)}` : `<span class="err">${esc(r.error)}</span>`;
+  });
+  el.querySelector('[data-act=export]')?.addEventListener('click', async ()=>{
+    const sql = pre.innerText;
+    const r = await (await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql})})).json();
+    out.textContent = r.ok ? `→ ${r.count} id в ${r.path}` : `ошибка: ${r.error}`;
+  });
+}
+
+$('#send').addEventListener('click', ask);
+$('#q').addEventListener('keydown', e=>{ if(e.key==='Enter') ask(); });
+</script>
+</body>
+</html>
